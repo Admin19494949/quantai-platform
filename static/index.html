@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuantAI · AI 智能量化分析平台</title>
+<link rel="stylesheet" href="/style.css?v=19">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<script>
+/* 图表库自愈加载：
+   1) 先试 CDN（浏览器直连，不经过低带宽隧道）；
+   2) 每个来源都校验 window.echarts 是否真的可用，半截脚本会被判失败并自动换源；
+   3) 全部失败时用 fetch 拉本站 echarts 并校验字节数（隧道截断会因 Content-Length 不符报错），
+      校验通过再以 blob 执行，失败自动重试 4 次；
+   4) 仍失败则暴露 window.__retryEcharts，页面上的按钮可重新走完整流程。 */
+(function () {
+  var CDNS = [
+    "https://cdn.staticfile.net/echarts/5.4.3/echarts.min.js",
+    "https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js",
+    "https://unpkg.com/echarts@5.4.3/dist/echarts.min.js"
+  ];
+  var MIN_SIZE = 900000;   // 完整 echarts.min.js 约 1MB，低于此值判定为被截断
+  var loading = false, done = false;
+
+  function ok() {
+    return typeof window.echarts !== "undefined" && !!window.echarts.version;
+  }
+  function finish(success) {
+    done = true;
+    document.documentElement.setAttribute("data-echarts", success ? "ok" : "fail");
+    try { window.dispatchEvent(new Event(success === true ? "echarts-ready" : "echarts-failed")); } catch (e) {}
+  }
+  function loadScript(src, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      var t = setTimeout(function () { cleanup(); reject(new Error("超时")); }, timeoutMs || 20000);
+      function cleanup() { clearTimeout(t); s.onload = s.onerror = null; }
+      s.async = false;
+      s.src = src;
+      s.onload = function () {
+        cleanup();
+        // 关键：脚本"加载成功"不代表内容完整，必须确认 echarts 真正可用
+        ok() ? resolve() : reject(new Error("脚本不完整"));
+      };
+      s.onerror = function () { cleanup(); reject(new Error("请求失败")); };
+      document.head.appendChild(s);
+    });
+  }
+  function loadLocal(n) {
+    // 必须用 location.origin 拼绝对地址：若地址栏带账号密码（serveo 直达链接），
+    // 相对路径 fetch 会因 "URL includes credentials" 直接抛错，兜底分支等于失效
+    var url = window.location.origin + "/echarts.min.js?r=" + Date.now();
+    return fetch(url, { cache: "no-store", credentials: "same-origin" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.arrayBuffer();
+      })
+      .then(function (buf) {
+        if (buf.byteLength < MIN_SIZE) throw new Error("内容不完整 " + buf.byteLength);
+        return new Promise(function (resolve, reject) {
+          var blobUrl = URL.createObjectURL(new Blob([buf], { type: "application/javascript" }));
+          var s = document.createElement("script");
+          s.src = blobUrl;
+          s.onload = function () { URL.revokeObjectURL(blobUrl); ok() ? resolve() : reject(new Error("执行失败")); };
+          s.onerror = function () { URL.revokeObjectURL(blobUrl); reject(new Error("执行失败")); };
+          document.head.appendChild(s);
+        });
+      })
+      .catch(function (e) {
+        if (n >= 3) throw e;
+        return new Promise(function (r) { setTimeout(r, 1500); }).then(function () { return loadLocal(n + 1); });
+      });
+  }
+  function run() {
+    if (loading) return;
+    if (ok()) { finish(true); return; }
+    loading = true;
+    var settled = false, pending = 2;   // CDN 链 + 本地兜底两条支路并行，谁先成功用谁
+    // 网络屏蔽 CDN 时可加 ?nocdn=1 直接走本站文件（也便于排查）
+    var noCdn = /[?&]nocdn=1/.test(window.location.search);
+    if (noCdn) pending = 1;
+    function win() {
+      if (settled) return;
+      settled = true; loading = false; finish(true);
+    }
+    function branchFail() {
+      if (settled) return;
+      pending -= 1;
+      if (pending <= 0) { settled = true; loading = false; finish(false); }
+    }
+    // 支路一：CDN 依次尝试（单源 8 秒超时，避免移动端被墙时长时间干等）
+    if (!noCdn) (function cdns(i) {
+      if (settled) return;
+      if (i >= CDNS.length) { branchFail(); return; }
+      loadScript(CDNS[i], 8000).then(
+        function () { ok() ? win() : cdns(i + 1); },
+        function () { cdns(i + 1); }
+      );
+    })(0);
+    // 支路二：本站文件（带字节数校验与重试），与 CDN 同时开始
+    loadLocal(0).then(
+      function () { ok() ? win() : branchFail(); },
+      function () { branchFail(); }
+    );
+  }
+  window.__retryEcharts = function () { done = false; loading = false; run(); };
+  run();
+})();
+</script>
+</head>
+<body>
+
+<!-- 顶栏 -->
+<header class="topbar">
+  <div class="logo">
+    <div class="mark">Q</div>
+    <div>QuantAI 智能量化平台<div class="sub">AI 驱动 · A股数据量化分析</div></div>
+  </div>
+  <div class="search-wrap">
+    <input id="searchInput" placeholder="输 6 位代码回车切换（如 001216）/ 搜名称 / 直接向 AI 提问" autocomplete="off">
+    <div class="search-drop" id="searchDrop"></div>
+  </div>
+  <div class="top-right">
+    <span class="badge" id="aiBadge"><span class="dot"></span>AI 引擎加载中…</span>
+  </div>
+</header>
+
+<!-- 股票信息条 -->
+<div class="stockbar" id="stockbar" style="display:flex">
+  <div><span class="name" id="sb-name">—</span></div>
+  <div><span class="price" id="sb-price">—</span> <span class="pct" id="sb-pct">—</span></div>
+  <div class="qgrid" id="sb-grid"></div>
+</div>
+
+<!-- Tabs -->
+<nav class="tabs">
+  <div class="tab active" data-tab="daily">📊 每日行情</div>
+  <div class="tab" data-tab="history">🕰️ 全部历史</div>
+  <div class="tab" data-tab="analysis">🔍 深度分析</div>
+  <div class="tab" data-tab="short">⚡ 短期涨跌</div>
+  <div class="tab" data-tab="heat">🔥 市场热度</div>
+  <div class="tab" data-tab="global">🌍 全球市场</div>
+  <div class="tab" data-tab="world">🌐 全球融合</div>
+  <div class="tab" data-tab="ai">🤖 AI 分析师</div>
+  <div class="tab" data-tab="fundamental">📋 基本面</div>
+  <div class="tab" data-tab="factors">🧮 多因子</div>
+  <div class="tab" data-tab="backtest">📈 策略回测</div>
+  <div class="tab" data-tab="portfoliobt">🎯 组合回测</div>
+  <div class="tab" data-tab="watch">📌 盯盘信号</div>
+  <div class="tab" data-tab="porisk">🧭 风险归因</div>
+  <div class="tab" data-tab="capitalflow">💰 资金流向</div>
+  <div class="tab" data-tab="validation">🔬 机构验证</div>
+  <div class="tab" data-tab="inst">🏛️ 机构级</div>
+</nav>
+
+<!-- 每日行情 -->
+<section class="view active" id="view-daily">
+  <div class="toolbar" id="daily-ranges">
+    <span class="muted" style="font-size:12px">K线区间：</span>
+    <button class="rng-btn" data-n="60">60日</button>
+    <button class="rng-btn active" data-n="120">120日</button>
+    <button class="rng-btn" data-n="250">250日</button>
+    <span class="muted" style="font-size:12px;margin-left:12px">个股每日交易数据 · K线 + 均线 + 成交量 + MACD</span>
+  </div>
+  <div class="cards c4" id="daily-summary"></div>
+  <div class="card"><div id="daily-kline" class="chart lg"></div></div>
+  <div class="ai-box" id="daily-ai"></div>
+</section>
+
+<!-- 全部历史 -->
+<section class="view" id="view-history">
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))" id="hist-info"></div>
+  <div class="card" style="margin-bottom:16px">
+    <h3>上市以来全部日线数据 <span class="muted" style="font-size:11px;font-weight:400">（不复权原始价格 · 拖动下方滑块缩放 · 可导出CSV）</span></h3>
+    <div id="hist-kline" class="chart lg"></div>
+  </div>
+  <div class="cards c2">
+    <div class="card"><h3>历年收益（%）</h3><div id="hist-yearly" class="chart sm"></div></div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;align-content:start">
+      <div id="hist-extreme" style="display:contents"></div>
+      <button class="btn primary" id="hist-csv" style="grid-column:1/3;margin-top:4px">⬇ 导出上市以来全部交易数据 CSV</button>
+    </div>
+  </div>
+  <div class="ai-box" id="hist-ai"></div>
+</section>
+
+<!-- 深度分析 -->
+<section class="view" id="view-analysis">
+  <div class="cards c3" id="ana-kpi"></div>
+  <div class="cards c4" id="ana-range"></div>
+  <div id="ana-signals"></div>
+  <div class="card" style="margin-top:16px"><h3>上市以来月度平均收益（%）· 季节性规律</h3><div id="ana-monthly" class="chart sm"></div></div>
+  <div class="card" style="margin-top:14px">
+    <h3>🧪 引擎回测验证 <span class="muted" style="font-size:11px;font-weight:400">（截断信息流·模拟历史视角 · 检验信号真实准确性）
+      <button class="btn primary" id="bt-run" style="float:right;margin-top:-6px">▶ 运行回测</button></span></h3>
+    <div id="bt-body" class="muted" style="padding:10px 4px;font-size:13px">
+      点击「运行回测」对 <b id="bt-code">平安银行</b> 做历史回测：在 15 个历史时点用当时可见数据做预测，与之后 20 日真实走势比对 ——
+      输出预测方向命中率（vs 随机基准 50%）、概率校准度、中性弃权合理性、七因子评分收益区分度。
+    </div>
+  </div>
+  <div class="ai-box" id="ana-ai"></div>
+</section>
+
+<!-- 短期涨跌 -->
+<section class="view" id="view-short">
+  <div class="cards c4" id="short-head"></div>
+  <div class="gauge-wrap">
+    <div class="card"><h3>多空信号仪表盘</h3><div id="short-gauge" class="chart sm"></div></div>
+    <div class="card"><h3>七因子评分（加权贡献，红色看多 / 绿色看空）</h3><div id="short-factors" class="chart sm"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>因子明细</h3>
+    <table class="tbl" id="short-factors-table"><tbody id="short-factors-list"></tbody></table>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>近60个交易日走势</h3><div id="short-kline" class="chart sm"></div></div>
+  <div class="ai-box" id="short-ai"></div>
+</section>
+
+<!-- 市场热度 -->
+<section class="view" id="view-heat">
+  <div class="cards c4" id="heat-head"></div>
+  <div class="gauge-wrap">
+    <div class="card"><h3>全市场热度仪表盘</h3><div id="heat-gauge" class="chart sm"></div></div>
+    <div class="card"><h3>市场广度（上涨 / 平盘 / 下跌）</h3><div id="heat-breadth" style="padding:10px 4px"></div>
+      <h3 style="margin-top:18px">热度分项</h3><div id="heat-components" style="padding:8px 4px"></div></div>
+    <div class="card"><h3>热度趋势（近30个交易日）</h3><div id="heat-history" class="chart sm"></div></div>
+  </div>
+  <div class="cards c4" id="heat-indices" style="margin-top:14px"></div>
+  <div class="cards c2" id="heat-tops"></div>
+  <div class="ai-box" id="heat-ai"></div>
+</section>
+
+<!-- 全球市场 -->
+<section class="view" id="view-global">
+  <div class="toolbar" style="gap:10px">
+    <input id="gSearchInput" placeholder="搜索全球资产：特斯拉 / 黄金 / 原油 / 美元 / 日经 / 港股腾讯 / 输英文如 tsla" autocomplete="off"
+           style="flex:1;max-width:520px;background:var(--panel2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:10px 14px;outline:none;font-size:13px">
+    <div class="search-drop" id="gSearchDrop" style="left:auto;right:auto"></div>
+    <span class="muted" style="font-size:12px">美股(1984-) · 外汇(1994-)+交叉盘12对(ECB 1999-) · 国际商品(1996-) · 国内期货(2008-) 全历史 · 港股/全球指数实时</span>
+  </div>
+  <div id="g-overview"></div>
+  <div id="g-asset"></div>
+</section>
+
+<!-- 全球数据融合 -->
+<section class="view" id="view-world">
+  <div class="cards c4" id="world-counts"></div>
+
+  <div class="card">
+    <h3>🌐 全球 10 大类资产覆盖
+      <span class="muted" style="font-size:11px;font-weight:400">标的数 · 数据源 · 历史起点 · 缓存区间 · 诚实标注的局限</span></h3>
+    <div id="world-coverage" class="muted" style="padding:10px 4px;font-size:13px">加载中…</div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>📡 各类别实时行情
+      <span class="muted" style="font-size:11px;font-weight:400">每类取 4 个代表标的，点击查看全历史 K 线</span></h3>
+    <div id="world-quotes" class="muted" style="padding:10px 4px;font-size:13px">加载中…</div>
+  </div>
+
+  <div id="world-chart"></div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>🧬 全球因子看板
+      <span class="muted" style="font-size:11px;font-weight:400">6 因子等权合成 · 与沪深300 同期/滞后相关 · 滞后口径无未来函数</span>
+      <button class="btn primary" id="world-dash-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="world-dashboard" class="muted" style="padding:10px 4px;font-size:13px">
+      点击「运行」：把全球股票风险偏好、美元强度、商品、利率久期、加密、中国离岸资产 6 个因子做成日频序列，
+      输出近 1/5/20/60 日收益、年化波动、因子间相关矩阵，以及与 A 股「同日」和「全球 t-1 → A 股 t」的相关。
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>⏱️ 全球 → A 股 领先滞后
+      <span class="muted" style="font-size:11px;font-weight:400">lag 0~5 相关系数曲线 · 找出可交易的隔夜传导</span>
+      <button class="btn primary" id="world-lag-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="world-leadlag" class="muted" style="padding:10px 4px;font-size:13px">
+      逐 lag 计算全球因子对沪深300的相关，lag=1 才是「隔夜可交易」口径；lag=0 含交易时段重叠与前瞻偏差。
+    </div>
+  </div>
+
+  <div class="cards c2" style="margin-top:16px">
+    <div class="card">
+      <h3>🛡️ 组合全球 Beta
+        <button class="btn" id="world-beta-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+      <div id="world-beta" class="muted" style="padding:10px 4px;font-size:13px">
+        组合收益对 6 个全球因子（滞后 1 日）做 OLS，输出 beta / t 值 / R² 与完全对冲所需名义金额。
+      </div>
+    </div>
+    <div class="card">
+      <h3>🧭 全球择时四象限
+        <button class="btn" id="world-regime-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+      <div id="world-regime" class="muted" style="padding:10px 4px;font-size:13px">
+        「全球股票 60 日趋势 × 美元 60 日趋势」四种状态，统计未来 5 日沪深300 收益、胜率与建议仓位系数。
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>🧪 全球因子接入 Alpha 检验
+      <span class="muted" style="font-size:11px;font-weight:400">原有 14 因子 vs 追加 3 个全球因子的样本外 IC 对比 · 无正贡献则如实不启用</span>
+      <button class="btn primary" id="world-alpha-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="world-alpha" class="muted" style="padding:10px 4px;font-size:13px">
+      在训练段选因子、在样本外段评估：加入「全球Beta、美元敏感度、行业全球动量」后，样本外 IC 是否真的提升。
+      这是判断「全球数据是否合理融合进模型」的唯一证据，而不是摆着好看。
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>🗺️ 融合矩阵
+      <span class="muted" style="font-size:11px;font-weight:400">数据层/因子层/风险层/择时层/组合层/执行层 · 已接入与缺口</span></h3>
+    <div id="world-matrix" class="muted" style="padding:10px 4px;font-size:13px">加载中…</div>
+  </div>
+</section>
+
+<!-- AI 分析师 -->
+<section class="view" id="view-ai">
+  <div class="card" id="modelsPanel" style="margin-bottom:14px">
+    <h3>🧠 多模型引擎 <span class="muted" style="font-size:11px;font-weight:400" id="modelsSummary"></span>
+      <label style="float:right;font-size:12px;font-weight:400;cursor:pointer"><input type="checkbox" id="collabToggle" style="vertical-align:-2px"> 委员会协作模式（多模型并行独立作答 + 主席仲裁合并，防观点冲突）</label>
+    </h3>
+    <div class="m-grid" id="modelsGrid"><div class="muted" style="padding:8px">加载中…</div></div>
+    <div class="muted" style="font-size:11px;margin-top:8px">点击卡片可为该模型配置 API Key（保存到服务器 ai_config.json，本地不出网）。灰色=待配置 · 绿点=已上线 · 红⃫=本沙箱网络屏蔽（本地部署可用）。配置后自动启用，多个模型协作时由主席模型合并观点、标注分歧，不会互相冲突。</div>
+  </div>
+  <div class="card" id="agentPanel" style="margin-bottom:12px">
+    <h3>🧠 深度思考（自主智能体）
+      <label style="float:right;font-size:12px;font-weight:400;cursor:pointer"><input type="checkbox" id="agentToggle" style="vertical-align:-2px"> 启用自主推理</label>
+    </h3>
+    <div class="muted" style="font-size:12px;line-height:1.7">
+      开启后，模型会<b>自己决定查哪些数据</b>（每日行情指标 / 全历史 / 短期涨跌 / 基本面 / 因子 / 资金流 / 热度 / 全球 / 涨停 / 选股 / 风险），
+      多步取证 → 推理 → <b>自我复核</b> → 沉淀<b>长期记忆</b>，并展示完整思考过程。配置模型 Key 后自动启用；未配置时自动关闭，提问仍由内置规则引擎回答。
+    </div>
+    <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn" id="mem-refresh">🧠 查看长期记忆</button>
+      <button class="btn" id="mem-clear">清空记忆</button>
+      <span class="muted" id="mem-sum" style="font-size:12px"></span>
+    </div>
+    <div id="mem-list" style="font-size:12px;margin-top:8px;display:none"></div>
+  </div>
+  <div class="card chat-wrap">
+    <div class="chat-msgs" id="chatMsgs">
+      <div class="msg bot"><div class="ai-md">
+        <h3>👋 你好，我是 QuantAI AI 分析师</h3>
+        <p>我可以调动 AI 模型结合<b>实时量化指标</b>为你分析个股与市场。当前关注标的：<b id="chatStock">000001 平安银行</b>（顶栏可搜索切换）。</p>
+        <p>试试下方的快捷提问，或直接输入你的问题，例如：</p>
+        <ul>
+          <li>分析当前股票的日线数据，给出操作建议</li>
+          <li>它短期会涨还是跌？上涨概率多大？</li>
+          <li>现在市场热度如何？适合什么仓位？</li>
+        </ul>
+      </div></div>
+    </div>
+    <div class="chat-quick" id="chatQuick"></div>
+    <div class="chat-input">
+      <textarea id="chatInput" placeholder="输入你的问题…（Enter 发送 / Shift+Enter 换行）"></textarea>
+      <button id="chatSend">发 送</button>
+    </div>
+  </div>
+</section>
+
+<!-- 基本面 -->
+<section class="view" id="view-fundamental">
+  <div class="card" id="fund-loading" style="text-align:center;padding:40px">加载中…</div>
+  <div id="fund-content" style="display:none">
+    <div class="cards c4" id="fund-valuation"></div>
+    <div class="cards c2" style="margin-top:16px">
+      <div class="card"><h3>📊 财务指标 <span class="muted" id="fund-report-date" style="font-size:11px;font-weight:400"></span></h3><div id="fund-financial" class="kv-list"></div></div>
+      <div class="card"><h3>🏭 同业对比（全市场分位）</h3><div id="fund-peer" class="kv-list"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 多因子 -->
+<section class="view" id="view-factors">
+  <div class="card" id="fac-loading" style="text-align:center;padding:40px">加载中…</div>
+  <div id="fac-content" style="display:none">
+    <div class="cards c2">
+      <div class="card"><h3>🧮 综合因子得分</h3><div id="fac-score" style="font-size:48px;font-weight:700;text-align:center;padding:20px 0"></div><div id="fac-rating" style="text-align:center;font-size:16px"></div></div>
+      <div class="card"><h3>五大类因子雷达图</h3><div id="fac-radar" class="chart" style="height:320px"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>因子明细（含全市场分位）</h3><div id="fac-detail" class="kv-list"></div></div>
+  </div>
+</section>
+
+<!-- 策略回测 -->
+<section class="view" id="view-backtest">
+  <div class="toolbar">
+    <span class="muted" style="font-size:12px">策略：</span>
+    <button class="rng-btn active" data-bt="mr">均值回归</button>
+    <button class="rng-btn" data-bt="tb">趋势突破</button>
+    <button class="rng-btn" data-bt="momentum">动量</button>
+    <span class="muted" style="font-size:12px;margin-left:12px">回测区间：</span>
+    <button class="rng-btn" data-days="250">250日</button>
+    <button class="rng-btn active" data-days="500">500日</button>
+    <button class="rng-btn" data-days="750">750日</button>
+    <button class="btn primary" id="bt-strategy-run" style="margin-left:12px">▶ 运行回测</button>
+  </div>
+  <div class="card" id="bt-placeholder" style="text-align:center;padding:40px;color:#999">选择策略和区间后点击「运行回测」</div>
+  <div id="bt-content" style="display:none">
+    <div class="cards c4" id="bt-metrics"></div>
+    <div class="card" style="margin-top:16px"><h3>📈 净值曲线 vs 基准</h3><div id="bt-nav" class="chart" style="height:360px"></div></div>
+    <div class="card" style="margin-top:16px"><h3>📋 最近交易记录</h3><div id="bt-trades"></div></div>
+    <div class="card" style="margin-top:16px;font-size:12px;color:#999" id="bt-disclaimer"></div>
+  </div>
+</section>
+
+<!-- 组合回测 -->
+<section class="view" id="view-portfoliobt">
+  <div class="toolbar">
+    <span class="muted" style="font-size:12px">选股策略：</span>
+    <button class="rng-btn active" data-pbt="factor">多因子打分</button>
+    <button class="rng-btn" data-pbt="momentum">动量</button>
+    <button class="rng-btn" data-pbt="mr">均值回归</button>
+    <button class="rng-btn" data-pbt="tb">趋势突破</button>
+    <span class="muted" style="font-size:12px;margin-left:12px">区间：</span>
+    <button class="rng-btn" data-days="250">250日</button>
+    <button class="rng-btn active" data-days="500">500日</button>
+    <button class="rng-btn" data-days="750">750日</button>
+    <span class="muted" style="font-size:12px;margin-left:12px">再平衡：</span>
+    <button class="rng-btn" data-rb="10">10日</button>
+    <button class="rng-btn active" data-rb="20">20日</button>
+    <button class="rng-btn" data-rb="40">40日</button>
+    <span class="muted" style="font-size:12px;margin-left:12px">仓位：</span>
+    <button class="rng-btn active" data-wt="equal">等权</button>
+    <button class="rng-btn" data-wt="score">评分加权</button>
+    <button class="rng-btn" data-wt="risk">风险平价</button>
+    <button class="btn primary" id="pbt-run" style="margin-left:12px">▶ 运行组合回测</button>
+  </div>
+  <div class="card" id="pbt-placeholder" style="text-align:center;padding:40px;color:#999">
+    基于全市场财务快照按行业分散抽样的默认股票池（约40只/30+行业），选择策略后点击「运行组合回测」
+  </div>
+  <div id="pbt-content" style="display:none">
+    <div class="cards c4" id="pbt-metrics"></div>
+    <div class="card" style="margin-top:16px"><h3>📈 组合净值 vs 等权买入持有基准</h3><div id="pbt-nav" class="chart" style="height:360px"></div></div>
+    <div class="cards c2" style="margin-top:16px">
+      <div class="card"><h3>📦 期末持仓</h3><div id="pbt-holdings"></div></div>
+      <div class="card"><h3>🏭 期末行业暴露</h3><div id="pbt-industry" class="chart" style="height:300px"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>📋 交易记录（最近40笔）</h3><div id="pbt-trades"></div></div>
+    <div class="card" style="margin-top:16px;font-size:12px;color:#999" id="pbt-disclaimer"></div>
+  </div>
+</section>
+
+<!-- 盯盘信号 -->
+<section class="view" id="view-watch">
+  <div class="toolbar">
+    <span class="muted" style="font-size:12px">选股策略：</span>
+    <button class="rng-btn active" data-wstr="factor">多因子</button>
+    <button class="rng-btn" data-wstr="momentum">动量</button>
+    <button class="rng-btn" data-wstr="mr">均值回归</button>
+    <button class="rng-btn" data-wstr="tb">趋势突破</button>
+    <button class="btn primary" id="watch-run" style="margin-left:12px">▶ 生成今日信号</button>
+    <button class="btn" id="watch-brief">📮 生成每日简报</button>
+  </div>
+  <div class="cards c3" id="watch-summary"></div>
+  <div class="cards c2" style="margin-top:16px">
+    <div class="card">
+      <h3>💼 我的持仓</h3>
+      <div id="watch-holdings"></div>
+      <div class="toolbar" style="margin-top:10px">
+        <input id="hold-code" placeholder="代码" style="width:90px">
+        <input id="hold-shares" placeholder="股数" style="width:80px">
+        <input id="hold-cost" placeholder="成本价" style="width:80px">
+        <button class="btn" id="hold-add">添加/更新</button>
+        <button class="btn" id="hold-clear">清空持仓</button>
+      </div>
+    </div>
+    <div class="card"><h3>⚠️ 异动预警</h3><div id="watch-alerts"></div></div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>📋 今日操作建议</h3><div id="watch-actions"></div></div>
+  <div class="card" style="margin-top:16px">
+    <h3>🤖 智能体自主观察 <span class="muted" style="font-size:11px;font-weight:400">
+      （后台每 30 分钟自主扫描目标组合与持仓变化）
+      <button class="btn" id="agent-watch-run" style="float:right;margin-top:-6px">立即自主扫描</button></span></h3>
+    <div id="agent-watch-list" style="font-size:12.5px;line-height:1.8" class="muted">加载中…</div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h3>📮 每日简报</h3>
+    <div id="watch-brief-text" style="white-space:pre-wrap;font-size:12.5px;line-height:1.7"></div>
+    <div class="toolbar" style="margin-top:10px">
+      <input id="push-webhook" placeholder="Webhook 地址（钉钉/企业微信/飞书机器人，可选）" style="flex:1">
+      <button class="btn" id="push-btn">推送到 Webhook</button>
+    </div>
+    <div class="muted" id="push-result" style="font-size:12px;margin-top:6px"></div>
+  </div>
+  <div class="card" style="margin-top:16px;font-size:12px;color:#999">
+    信号基于日线收盘数据，盘中变化需人工复核；持仓数据仅保存在本地 SQLite，不构成投资建议。
+  </div>
+</section>
+
+<!-- 风险归因 -->
+<section class="view" id="view-porisk">
+  <div class="toolbar">
+    <input id="risk-codes" placeholder="股票代码，逗号分隔（留空=默认40只池）" style="flex:1;min-width:220px">
+    <input id="risk-days" type="number" value="250" style="width:80px" title="窗口交易日">
+    <button class="btn primary" id="risk-run">▶ 风险分析</button>
+    <button class="btn" id="attr-run">📊 收益归因</button>
+    <button class="btn" id="mix-run">🧬 策略组合优化</button>
+    <button class="btn" id="grid-run">🔍 参数寻优</button>
+  </div>
+  <div class="card" id="pr-placeholder" style="text-align:center;padding:40px;color:#999">
+    输入持仓代码或不填（默认股票池），选择上方任一分析
+  </div>
+  <div id="pr-content" style="display:none">
+    <!-- 风险 -->
+    <div id="pr-risk" style="display:none">
+      <div class="cards c4" id="risk-metrics"></div>
+      <div class="cards c2" style="margin-top:16px">
+        <div class="card"><h3>🏭 行业暴露</h3><div id="risk-industry" class="chart" style="height:300px"></div></div>
+        <div class="card"><h3>⚖️ 风险贡献 vs 风险平价</h3><div id="risk-contrib"></div></div>
+      </div>
+      <div class="cards c2" style="margin-top:16px">
+        <div class="card"><h3>🎨 风格暴露（全市场分位）</h3><div id="risk-style" class="kv-list"></div></div>
+        <div class="card"><h3>🔗 相关性 / 压力测试</h3><div id="risk-stress"></div></div>
+      </div>
+    </div>
+    <!-- 归因 -->
+    <div id="pr-attr" style="display:none">
+      <div class="cards c4" id="attr-summary"></div>
+      <div class="card" style="margin-top:16px"><h3>🏭 行业归因明细</h3><div id="attr-industry"></div></div>
+      <div class="card" style="margin-top:16px"><h3>📈 个股贡献</h3><div id="attr-stock"></div></div>
+    </div>
+    <!-- 策略组合优化 -->
+    <div id="pr-mix" style="display:none">
+      <div class="cards c3" id="mix-metrics"></div>
+      <div class="card" style="margin-top:16px"><h3>🧬 多策略合成净值</h3><div id="mix-nav" class="chart" style="height:340px"></div></div>
+      <div class="card" style="margin-top:16px"><h3>📊 策略权重与贡献</h3><div id="mix-detail"></div></div>
+    </div>
+    <!-- 参数寻优 -->
+    <div id="pr-grid" style="display:none">
+      <div class="cards c4" id="grid-summary"></div>
+      <div class="card" style="margin-top:16px"><h3>🔍 网格结果（按样本内夏普排序）</h3><div id="grid-table"></div></div>
+      <div class="card" style="margin-top:16px;font-size:12px;color:#c0392b" id="grid-warning"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 资金流向 -->
+<section class="view" id="view-capitalflow">
+  <div class="card" id="cf-loading" style="text-align:center;padding:40px">加载中…</div>
+  <div id="cf-content" style="display:none">
+    <div class="cards c3" id="cf-summary"></div>
+    <div class="card" style="margin-top:16px"><h3>📊 近10日主力资金流向</h3><div id="cf-chart" class="chart" style="height:320px"></div></div>
+    <div class="cards c2" style="margin-top:16px">
+      <div class="card"><h3>🌐 北向资金持股</h3><div id="cf-north" class="kv-list"></div></div>
+      <div class="card"><h3>🐯 龙虎榜</h3><div id="cf-lhb"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 机构验证 -->
+<section class="view" id="view-validation">
+  <div class="cards c4" id="val-counts"></div>
+  <div class="card">
+    <h3>🏦 与私募量化基金的能力对标
+      <span class="muted" style="font-size:11px;font-weight:400">逐项标注：已具备 / 部分具备 / 缺失</span></h3>
+    <div id="val-gap" class="muted" style="padding:10px 4px">加载中…</div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h3>📐 横截面因子 IC / ICIR / t 值
+      <span class="muted" style="font-size:11px;font-weight:400">同一交易日、多股之间因子值与未来收益的秩相关，纯价格因子无未来函数</span>
+      <button class="btn primary" id="val-ic-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="val-ic" class="muted" style="padding:10px 4px;font-size:13px">
+      点击「运行」用默认股票池（约 40 只行业分散标的）计算 5 个纯价格因子在 1/5/20 日持有期上的 IC 均值、ICIR、t 值与胜率。
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h3>🎯 滚动样本外验证
+      <span class="muted" style="font-size:11px;font-weight:400">前 60% 仅用于选因子，后 40% 纯执行 → 量化过拟合衰减</span>
+      <button class="btn primary" id="val-wf-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="val-wf" class="muted" style="padding:10px 4px;font-size:13px">
+      点击「运行」按 20 日调仓、持仓 10 只、单边成本 10bp，对比样本内与样本外的收益/夏普/回撤衰减，并给出成本敏感性。
+    </div>
+  </div>
+  <div class="cards c2" style="margin-top:16px">
+    <div class="card">
+      <h3>🎲 概率校准（Brier）
+        <button class="btn" id="val-cal-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+      <div id="val-cal" class="muted" style="padding:10px 4px;font-size:13px">
+        检验「相似形态上涨概率」是否可信：原始概率 vs 保序回归校准概率，Brier 越低越好，skill&gt;0 才优于永远猜基础涨率。
+      </div>
+    </div>
+    <div class="card">
+      <h3>🔍 数据与回测偏差审计
+        <button class="btn" id="val-audit-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+      <div id="val-audit" class="muted" style="padding:10px 4px;font-size:13px">
+        把幸存者偏差、未来函数、涨跌停不可成交、成本假设等短板逐项量化，而不是口头声明。
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h3>📒 Paper Trading（逐日模拟盘）
+      <span class="muted" style="font-size:11px;font-weight:400">训练段 60% 估因子 → 模拟段 40% 逐日执行，含 Amihud 冲击成本代理 + 可交易过滤</span>
+      <button class="btn primary" id="val-paper-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="val-paper" class="muted" style="padding:10px 4px;font-size:13px">
+      点击「运行」：用 500 天行情，前 300 天选因子权重、后 200 天逐日做 paper trading —— 输出组合净值曲线 vs 等权基准、最近交易记录、年化/夏普/回撤。
+    </div>
+  </div>
+</section>
+
+<!-- 机构级 -->
+<section class="view" id="view-inst">
+  <div class="cards c4" id="inst-counts"></div>
+
+  <div class="card">
+    <h3>🏛️ 顶级私募能力全景
+      <span class="muted" style="font-size:11px;font-weight:400">功能项 × 标准配置 × 所需数据 × 本站状态 × 个人交易劣势</span></h3>
+    <div id="inst-matrix" class="muted" style="padding:10px 4px;font-size:13px">加载中…</div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>📐 Barra 风格风险模型
+      <span class="muted" style="font-size:11px;font-weight:400">10 风格因子 + 行业因子 · 逐日横截面回归得因子收益 · 年化协方差 · 组合风险分解</span>
+      <button class="btn primary" id="inst-barra-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="inst-barra" class="muted" style="padding:10px 4px;font-size:13px">
+      点击「运行」：用日频量价构造 Beta/动量/规模/价值/成长/杠杆/流动性/特质波动/非线性规模/盈利收益率 10 个风格暴露，
+      与行业哑变量一起做逐日横截面回归，得到因子收益与协方差，并把组合波动拆成「因子风险 + 特质风险」。
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>🎯 带约束组合优化
+      <span class="muted" style="font-size:11px;font-weight:400">max wᵀα − λ·wᵀΣw − κ‖w−w₀‖ · 非负/单票/行业/风格/换手约束 · 投影梯度</span>
+      <button class="btn primary" id="inst-opt-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="inst-opt" class="muted" style="padding:10px 4px;font-size:13px">
+      点击「运行」：α 来自训练段 ICIR 加权多因子，Σ 来自 Barra 风格+特质风险，求解 12 只持仓、单票≤12%、单行业≤35% 的约束最优解。
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>⚙️ 算法交易与 TCA
+      <span class="muted" style="font-size:11px;font-weight:400">Almgren-Chriss 冲击成本 · TWAP/VWAP/POV 对比 · AUM 容量曲线</span>
+      <button class="btn primary" id="inst-tca-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+    <div id="inst-tca" class="muted" style="padding:10px 4px;font-size:13px">
+      点击「运行」：按 ADV 与波动率估算不同算法、不同管理规模下的冲击成本与净年化收益，直到成本把 alpha 吃光的容量上限。
+    </div>
+  </div>
+
+  <div class="cards c2" style="margin-top:16px">
+    <div class="card">
+      <h3>🛡️ DSR + PBO 过拟合诊断
+        <button class="btn" id="inst-dsr-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+      <div id="inst-dsr" class="muted" style="padding:10px 4px;font-size:13px">
+        Deflated Sharpe 按「试了多少次」折减夏普；PBO 用组合对称交叉验证估计「样本内最优在样本外落到中位数以下」的概率。
+      </div>
+    </div>
+    <div class="card">
+      <h3>📉 因子衰减半衰期
+        <button class="btn" id="inst-decay-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+      <div id="inst-decay" class="muted" style="padding:10px 4px;font-size:13px">
+        计算每个因子的 IC 在 1/2/3/5/10/20/40/60 日持有期上的衰减，拟合半衰期 → 决定调仓频率与成本上限。
+      </div>
+    </div>
+  </div>
+
+  <div class="cards c2" style="margin-top:16px">
+    <div class="card">
+      <h3>🤖 GBDT 非线性因子合成
+        <button class="btn" id="inst-ml-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+      <div id="inst-ml" class="muted" style="padding:10px 4px;font-size:13px">
+        直方图 GBDT（纯 numpy）学习因子交互，与线性 ICIR 加权在同一段样本外区间比较 IC —— 检验非线性是否真的有增量。
+      </div>
+    </div>
+    <div class="card">
+      <h3>🧩 多策略资金配置
+        <button class="btn" id="inst-alloc-run" style="float:right;margin-top:-6px">▶ 运行</button></h3>
+      <div id="inst-alloc" class="muted" style="padding:10px 4px;font-size:13px">
+        等权 / 风险平价（逆波动）/ 最小方差 / 最大夏普四种权重方案，对比收益、波动、回撤与策略间相关性。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 模型 Key 配置弹窗 -->
+<div class="modal-mask" id="modelModal" style="display:none">
+  <div class="modal">
+    <h3 id="mmTitle">配置模型</h3>
+    <div class="muted" id="mmDesc" style="font-size:12px;margin-bottom:10px"></div>
+    <label class="fld">API Key<input id="mmKey" type="password" placeholder="粘贴该平台的 API Key"></label>
+    <label class="fld">模型名（可选）<input id="mmModel" placeholder="留空用默认"></label>
+    <label style="font-size:12.5px;cursor:pointer"><input type="checkbox" id="mmPrimary"> 设为主模型（默认回答 + 委员会主席）</label>
+    <div style="margin-top:14px;text-align:right">
+      <button class="btn" id="mmCancel">取消</button>
+      <button class="btn primary" id="mmSave">保存并上线</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js?v=35"></script>
+</body>
+</html>

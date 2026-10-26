@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+data/cache.db
+deploy/
+*.log
+.git
+.DS_Store
+.htpasswd
+serveo_key
+serveo_key.pub

@@ -1,0 +1,7 @@
+__pycache__
+*.pyc
+data/cache.db
+deploy/
+.git
+*.log
+.DS_Store
