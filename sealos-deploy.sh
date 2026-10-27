@@ -1,0 +1,41 @@
+#!/bin/bash
+# QuantAI 在 Sealos Devbox 中的一键部署脚本
+# 用法：在 Devbox 终端里执行
+#   curl -fsSL https://cdn.jsdelivr.net/gh/Admin19494949/quantai-platform@main/sealos-deploy.sh | bash
+set -e
+
+PIP_MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
+REPO="https://github.com/Admin19494949/quantai-platform.git"
+APP_DIR="$HOME/quantai-platform"
+PORT=8000
+
+echo "[1/4] 获取代码 ..."
+if [ ! -d "$APP_DIR/.git" ]; then
+  rm -rf "$APP_DIR"
+  git clone --depth 1 "$REPO" "$APP_DIR"
+else
+  cd "$APP_DIR" && git pull --ff-only || true
+fi
+cd "$APP_DIR"
+
+echo "[2/4] 安装依赖（清华源）..."
+pip install --no-cache-dir -i "$PIP_MIRROR" -r requirements.txt
+
+echo "[3/4] 启动服务 ..."
+pkill -f "uvicorn server.main:app" 2>/dev/null || true
+sleep 1
+nohup uvicorn server.main:app --host 0.0.0.0 --port $PORT > /tmp/quantai.log 2>&1 &
+sleep 12
+
+echo "[4/4] 健康检查 ..."
+CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://127.0.0.1:$PORT/api/ai/status" || echo 000)
+echo "本机服务状态: $CODE"
+if [ "$CODE" != "200" ]; then
+  echo "--- 最近日志 ---"
+  tail -30 /tmp/quantai.log
+  exit 1
+fi
+echo "部署完成。服务已在 0.0.0.0:$PORT 运行。"
+echo "下一步：在 Devbox 界面点击「发布 / Release」，启动命令填："
+echo "  cd \$HOME/quantai-platform && uvicorn server.main:app --host 0.0.0.0 --port 8000"
+echo "端口填 8000"
