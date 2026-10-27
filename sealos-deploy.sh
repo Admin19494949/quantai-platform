@@ -42,10 +42,16 @@ sleep 1
 nohup python3 -m uvicorn server.main:app --host 0.0.0.0 --port $PORT > /tmp/quantai.log 2>&1 &
 
 echo "[4/4] 健康检查（最多等待 90 秒）..."
+# 若已启用账号密码保护，健康检查需要带上凭据（凭据文件不在代码库中）
+AUTH_CURL=()
+if [ -f "$HOME/.quantai_auth.json" ]; then
+  read -r AUTH_USER AUTH_PASS < <(python3 -c "import json;c=json.load(open('$HOME/.quantai_auth.json'));print(c.get('user',''),c.get('pass',''))" 2>/dev/null || true)
+  if [ -n "$AUTH_USER" ]; then AUTH_CURL=(-u "$AUTH_USER:$AUTH_PASS"); fi
+fi
 CODE=000
 for i in $(seq 1 45); do
   sleep 2
-  CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:$PORT/api/ai/status" 2>/dev/null || true)
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_CURL[@]}" --max-time 5 "http://127.0.0.1:$PORT/api/ai/status" 2>/dev/null || true)
   [ "$CODE" = "200" ] && break
 done
 echo "本机服务状态: $CODE"

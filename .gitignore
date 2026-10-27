@@ -8,3 +8,5 @@ deploy/
 .htpasswd
 serveo_key
 serveo_key.pub
+auth.json
+.quantai_auth.json

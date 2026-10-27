@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 """QuantAI 智能量化分析平台 - 后端服务"""
+import base64
 import io
 import json
 import os
+import secrets
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FTTimeoutError
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -32,6 +34,53 @@ async def _no_cache(request, call_next):
     resp = await call_next(request)
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
+
+
+def _load_basic_auth():
+    """读取 Basic Auth 凭据：环境变量优先，其次本地凭据文件（不入代码库）。
+    未配置任何凭据时不启用验证，便于本地开发。"""
+    if os.environ.get("QUANT_AUTH_DISABLED", "").lower() in ("1", "true", "yes"):
+        return None
+    user = os.environ.get("QUANT_AUTH_USER")
+    pwd = os.environ.get("QUANT_AUTH_PASS")
+    if not (user and pwd):
+        for path in (os.path.join(os.path.expanduser("~"), ".quantai_auth.json"),
+                     os.path.join(ds.BASE_DIR, "auth.json")):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                user, pwd = cfg.get("user"), cfg.get("pass")
+                if user and pwd:
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+    return (user, pwd) if (user and pwd) else None
+
+
+_BASIC_AUTH = _load_basic_auth()
+
+
+@app.middleware("http")
+async def _basic_auth(request, call_next):
+    # 为公网地址加一层账号密码保护，凭据不会写进代码库
+    if not _BASIC_AUTH:
+        return await call_next(request)
+    header = request.headers.get("authorization", "")
+    if header[:6].lower() == "basic ":
+        try:
+            raw = base64.b64decode(header[6:]).decode("utf-8")
+            user, _, pwd = raw.partition(":")
+            if (secrets.compare_digest(user, _BASIC_AUTH[0])
+                    and secrets.compare_digest(pwd, _BASIC_AUTH[1])):
+                return await call_next(request)
+        except Exception:  # noqa: BLE001
+            pass
+    return Response(
+        status_code=401,
+        content="需要账号密码才能访问 QuantAI",
+        media_type="text/plain; charset=utf-8",
+        headers={"WWW-Authenticate": 'Basic realm="QuantAI"'},
+    )
 
 
 STATIC_DIR = os.path.join(ds.BASE_DIR, "static")
