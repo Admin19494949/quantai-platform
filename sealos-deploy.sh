@@ -24,6 +24,16 @@ cd "$APP_DIR"
 echo "[2/4] 安装依赖（清华源）..."
 pip install --no-cache-dir -i "$PIP_MIRROR" -r requirements.txt
 
+# 依赖预检：requirements.txt 若漏项，这里会立刻暴露，而不是等到服务启动后才报错
+echo "[2.5/4] 校验代码依赖是否齐全 ..."
+if ! python3 -c "import server.main" 2>/tmp/quantai_import.err; then
+  echo "依赖缺失，缺少以下模块："
+  grep -oE "No module named '[^']+'" /tmp/quantai_import.err | sort -u
+  echo "请把上面缺失的模块名补进 requirements.txt 后重试。"
+  exit 1
+fi
+echo "依赖校验通过。"
+
 echo "[3/4] 启动服务 ..."
 pkill -f "uvicorn server.main:app" 2>/dev/null || true
 sleep 1
