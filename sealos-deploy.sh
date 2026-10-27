@@ -39,12 +39,18 @@ pkill -f "uvicorn server.main:app" 2>/dev/null || true
 sleep 1
 # 用 python -m uvicorn，避免依赖 PATH 中的可执行文件
 nohup python3 -m uvicorn server.main:app --host 0.0.0.0 --port $PORT > /tmp/quantai.log 2>&1 &
-sleep 12
 
-echo "[4/4] 健康检查 ..."
-CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://127.0.0.1:$PORT/api/ai/status" || echo 000)
+echo "[4/4] 健康检查（最多等待 90 秒）..."
+CODE=000
+for i in $(seq 1 45); do
+  sleep 2
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:$PORT/api/ai/status" 2>/dev/null || true)
+  [ "$CODE" = "200" ] && break
+done
 echo "本机服务状态: $CODE"
 if [ "$CODE" != "200" ]; then
+  echo "--- 进程状态 ---"
+  pgrep -af "uvicorn server.main:app" || echo "（未找到 uvicorn 进程）"
   echo "--- 最近日志 ---"
   tail -30 /tmp/quantai.log
   exit 1
