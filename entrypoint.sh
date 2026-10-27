@@ -18,8 +18,8 @@ done
 cd "$APP_DIR"
 echo "[entrypoint] 工作目录: $APP_DIR"
 
-# 端口：优先用环境变量 PORT，默认 8000
-PORT="${PORT:-8000}"
+# 端口：优先用环境变量 PORT，默认 8080（与 DevBox「容器暴露端口」保持一致）
+PORT="${PORT:-8080}"
 echo "[entrypoint] 启动 QuantAI: 0.0.0.0:$PORT"
 
 exec python3 -m uvicorn server.main:app --host 0.0.0.0 --port "$PORT"

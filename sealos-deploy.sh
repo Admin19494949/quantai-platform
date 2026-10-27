@@ -10,7 +10,8 @@ export PATH="$HOME/.local/bin:$PATH"
 PIP_MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
 REPO="https://github.com/Admin19494949/quantai-platform.git"
 APP_DIR="$HOME/quantai-platform"
-PORT=8000
+# 必须与 DevBox「容器暴露端口」一致，否则公网调试地址转发不到服务
+PORT=8080
 
 echo "[1/4] 获取代码 ..."
 if [ ! -d "$APP_DIR/.git" ]; then
@@ -57,5 +58,5 @@ if [ "$CODE" != "200" ]; then
 fi
 echo "部署完成。服务已在 0.0.0.0:$PORT 运行。"
 echo "下一步：在 Devbox 界面点击「发布 / Release」，启动命令填："
-echo "  export PATH=\$HOME/.local/bin:\$PATH && cd \$HOME/quantai-platform && python3 -m uvicorn server.main:app --host 0.0.0.0 --port 8000"
-echo "端口填 8000"
+echo "  export PATH=\$HOME/.local/bin:\$PATH && cd \$HOME/quantai-platform && python3 -m uvicorn server.main:app --host 0.0.0.0 --port 8080"
+echo "端口填 8080"
