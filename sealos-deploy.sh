@@ -1,8 +1,11 @@
 #!/bin/bash
 # QuantAI 在 Sealos Devbox 中的一键部署脚本
-# 用法：在 Devbox 终端里执行
-#   curl -fsSL https://cdn.jsdelivr.net/gh/Admin19494949/quantai-platform@main/sealos-deploy.sh | bash
+# 用法（在 Devbox 终端里执行）：
+#   cd ~/quantai-platform && bash sealos-deploy.sh
 set -e
+
+# pip 会以 --user 方式把可执行文件装到 ~/.local/bin，必须加入 PATH，否则 uvicorn 找不到
+export PATH="$HOME/.local/bin:$PATH"
 
 PIP_MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
 REPO="https://github.com/Admin19494949/quantai-platform.git"
@@ -24,7 +27,8 @@ pip install --no-cache-dir -i "$PIP_MIRROR" -r requirements.txt
 echo "[3/4] 启动服务 ..."
 pkill -f "uvicorn server.main:app" 2>/dev/null || true
 sleep 1
-nohup uvicorn server.main:app --host 0.0.0.0 --port $PORT > /tmp/quantai.log 2>&1 &
+# 用 python -m uvicorn，避免依赖 PATH 中的可执行文件
+nohup python3 -m uvicorn server.main:app --host 0.0.0.0 --port $PORT > /tmp/quantai.log 2>&1 &
 sleep 12
 
 echo "[4/4] 健康检查 ..."
@@ -37,5 +41,5 @@ if [ "$CODE" != "200" ]; then
 fi
 echo "部署完成。服务已在 0.0.0.0:$PORT 运行。"
 echo "下一步：在 Devbox 界面点击「发布 / Release」，启动命令填："
-echo "  cd \$HOME/quantai-platform && uvicorn server.main:app --host 0.0.0.0 --port 8000"
+echo "  export PATH=\$HOME/.local/bin:\$PATH && cd \$HOME/quantai-platform && python3 -m uvicorn server.main:app --host 0.0.0.0 --port 8000"
 echo "端口填 8000"
